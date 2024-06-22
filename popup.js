@@ -1,24 +1,45 @@
+let rawHTMLContent = null;
+let odpowiedziTestContent = null;
+let elementsFound = false;
+
+const contentScript = `
+    window.__extension_content = {
+        rawHTMLContent: document.querySelector('.rawHTML_base')?.innerHTML || null,
+        odpowiedziTestContent: document.querySelector('.odpowiedziTest')?.innerHTML || null,
+        elementsFound: !!document.querySelector('.rawHTML_base') || !!document.querySelector('.odpowiedziTest')
+    };
+`;
+
+// const contentScript = `
+//     window.__extension_content = {
+//         rowHTMLContent: document.querySelector('.lista-clouda-element ')?.innerHTML || null,
+//         odpowiedziTestContent: document.querySelector('.odpowiedziTest')?.innerHTML || null,
+//         elementsFound: !!document.querySelector('.lista-clouda-element ') || !!document.querySelector('.odpowiedziTest')
+//     };
+// `
+
 function fetchContentFromPage() {
+    let activeTab;
+
     return browser.tabs.query({active: true, currentWindow: true})
         .then((tabs) => {
-            const activeTab = tabs[0];
+            activeTab = tabs[0];
+            return browser.tabs.executeScript(activeTab.id, {code: contentScript});
+        })
+        .then(() => {
             return browser.tabs.executeScript(activeTab.id, {
                 code: `
-                    const rawHTMLBaseDiv = document.querySelector('.rawHTML_base');
-                    const rawHTMLContent = rawHTMLBaseDiv ? rawHTMLBaseDiv.innerHTML : null;
-
-                    const odpowiedziTestDiv = document.querySelector('.odpowiedziTest');
-                    const odpowiedziTestContent = odpowiedziTestDiv ? odpowiedziTestDiv.innerHTML : null;
-
-                    // Return an object with the retrieved content and flags
-                    ({ rawHTMLContent: rawHTMLContent, odpowiedziTestContent: odpowiedziTestContent, elementsFound: rawHTMLBaseDiv !== null || odpowiedziTestDiv !== null });
+                    window.__extension_content;
                 `
             });
         })
         .then((results) => {
-            console.log('Content of rawHTML_base:', results[0].rawHTMLContent);
-            console.log('Content of odpowiedziTest:', results[0].odpowiedziTestContent);
-            return results[0];
+            rawHTMLContent = results[0].rawHTMLContent;
+            odpowiedziTestContent = results[0].odpowiedziTestContent;
+            elementsFound = results[0].elementsFound;
+
+            console.log('Content of rawHTML_base:', rawHTMLContent);
+            console.log('Content of odpowiedziTest:', odpowiedziTestContent);
         })
         .catch((error) => {
             console.error('Error executing script:', error);
@@ -71,16 +92,22 @@ function getOpenAIResponse(question, answers) {
 document.addEventListener('DOMContentLoaded', () => {
     const fetchButton = document.getElementById('fetchContent');
     const resultDisplay = document.getElementById('resultDisplay');
+    const aiResponseDisplay = document.getElementById('aiResponse');
 
     if (fetchButton) {
+        let fetching = false;
+
         fetchButton.addEventListener('click', () => {
+            if (fetching) return; // Prevent multiple fetches simultaneously
+            fetching = true;
+
+            resultDisplay.textContent = 'Fetching content...';
+
             fetchContentFromPage()
-                .then(({rawHTMLContent, odpowiedziTestContent, elementsFound}) => {
+                .then(() => {
                     if (elementsFound) {
                         console.log('Element .rawHTML_base found in HTML:', rawHTMLContent);
                         console.log('Element .odpowiedziTest found in HTML:', odpowiedziTestContent);
-
-                        resultDisplay.textContent = "Found HTML content\n";
 
                         const question = rawHTMLContent || 'What is the meaning of life?';
                         const answers = odpowiedziTestContent || null;
@@ -95,15 +122,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(aiResponse => {
                     if (aiResponse) {
                         console.log('Handling AI response:', aiResponse);
-                        resultDisplay.textContent += `\n\nAI Response: ${JSON.stringify(aiResponse)}`;
+                        aiResponseDisplay.textContent = `AI Response: ${aiResponse}`;
                     } else {
                         console.error('No valid AI response');
-                        resultDisplay.textContent += '\n\nNo valid AI response.';
+                        aiResponseDisplay.textContent = 'No valid AI response.';
                     }
                 })
                 .catch(error => {
                     console.error('Error fetching content or AI response:', error);
-                    resultDisplay.textContent += `\n\nError: ${error.message}`;
+                    resultDisplay.textContent = `Error: ${error.message}`;
+                })
+                .finally(() => {
+                    fetching = false;
                 });
         });
     } else {
